@@ -1,0 +1,252 @@
+<!doctype html>
+<html lang="id">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>Keuangan</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1"></script>
+    <style type="text/tailwindcss">
+      @layer components {
+        .card {
+          @apply bg-white dark:bg-slate-800 rounded-lg border border-slate-200 dark:border-slate-700 p-4;
+        }
+        .inp {
+          @apply w-full rounded-md border border-slate-300 dark:border-slate-600 bg-transparent px-3 py-2 focus:outline-none focus:ring-2 focus:ring-teal-600;
+        }
+        .btn {
+          @apply rounded-md bg-teal-700 hover:bg-teal-800 text-white px-4 py-2 font-medium;
+        }
+      }
+      body {
+        font-family: ui-sans-serif, system-ui, 'Segoe UI', Roboto, sans-serif;
+        font-variant-numeric: tabular-nums;
+      }
+    </style>
+  </head>
+  <body class="bg-slate-100 text-slate-900 dark:bg-slate-900 dark:text-slate-100 min-h-screen">
+    <div id="login" class="max-w-sm mx-auto mt-24 px-4">
+      <div class="card space-y-3">
+        <h1 class="text-xl font-semibold">Keuangan Saya</h1>
+        <input id="kode" type="password" class="inp" placeholder="Kode akses" autocomplete="current-password" />
+        <button class="btn w-full" onclick="masuk()">Masuk</button>
+        <p id="lerr" class="text-sm text-red-600"></p>
+      </div>
+    </div>
+
+    <main id="app" class="hidden max-w-5xl mx-auto p-4 space-y-4">
+      <header class="flex items-center justify-between gap-2">
+        <div>
+          <h1 class="text-xl font-semibold">Keuangan Saya</h1>
+          <p id="periode" class="text-sm text-slate-500"></p>
+        </div>
+        <div class="flex items-center gap-2">
+          <span id="status" class="px-3 py-1 rounded-full text-sm font-medium"></span> <button class="btn" onclick="muat()">Muat ulang</button><button class="text-sm underline" onclick="keluar()">Keluar</button>
+        </div>
+      </header>
+      <p id="toast" class="hidden card text-sm"></p>
+
+      <section id="kpi" class="grid grid-cols-2 md:grid-cols-3 gap-3"></section>
+
+      <div class="grid md:grid-cols-2 gap-4">
+        <section class="card">
+          <h2 class="font-semibold mb-3">Budget per kategori</h2>
+          <div id="kat" class="space-y-3"></div>
+        </section>
+        <section class="card space-y-3">
+          <h2 class="font-semibold">Catat transaksi</h2>
+          <div class="flex gap-2">
+            <select id="tipe" class="inp" onchange="$('fkat').style.display = this.value == 'masuk' ? 'none' : ''">
+              <option value="keluar">Pengeluaran</option>
+              <option value="masuk">Pemasukan</option>
+            </select>
+            <input id="jml" class="inp" placeholder="20000 / 20k / 1,5jt" inputmode="text" />
+          </div>
+          <select id="fkat" class="inp"></select>
+          <input id="ket" class="inp" placeholder="Keterangan (opsional)" />
+          <button class="btn w-full" onclick="tambah()">Simpan</button>
+        </section>
+      </div>
+
+      <div class="grid md:grid-cols-2 gap-4">
+        <section class="card">
+          <h2 class="font-semibold mb-2">Budget vs terpakai</h2>
+          <canvas id="c1" height="200"></canvas>
+        </section>
+        <section class="card">
+          <h2 class="font-semibold mb-2">Pengeluaran per hari</h2>
+          <canvas id="c2" height="200"></canvas>
+        </section>
+      </div>
+
+      <section class="card">
+        <h2 class="font-semibold mb-2">Riwayat terbaru</h2>
+        <div id="tx" class="divide-y divide-slate-200 dark:divide-slate-700"></div>
+      </section>
+
+      <section class="card space-y-4">
+        <h2 class="font-semibold">Gaji dan pengaturan</h2>
+        <div class="grid md:grid-cols-3 gap-2 items-end">
+          <label class="text-sm">Gaji masuk<input id="gj" class="inp" placeholder="2jt" /></label>
+          <label class="text-sm">Perkiraan gaji berikutnya<input id="gakhir" type="date" class="inp" /></label>
+          <button class="btn" onclick="gaji()">Mulai periode baru</button>
+        </div>
+        <div class="grid md:grid-cols-3 gap-2 items-end">
+          <label class="text-sm">Ubah akhir periode<input id="akhir2" type="date" class="inp" /></label>
+          <button class="btn" onclick="akhir()">Simpan tanggal</button>
+        </div>
+        <div>
+          <p class="text-sm mb-2">Persen budget dari gaji <span id="tot" class="text-slate-500"></span></p>
+          <div id="bud" class="grid grid-cols-2 md:grid-cols-4 gap-2"></div>
+          <button class="btn mt-3" onclick="simpanBudget()">Simpan budget</button>
+        </div>
+      </section>
+    </main>
+
+    <script>
+      const API = 'https://script.google.com/macros/s/AKfycbxGZieFWbJXMRQ4er-OZ6PVn5WCRK7EMzZ3lbLpQjyMu3UwoIj5lwmEUYoxI_WRnj8Q/exec';
+      const $ = (id) => document.getElementById(id);
+      const rp = (n) =>
+        'Rp' +
+        Math.round(n)
+          .toString()
+          .replace(/\B(?=(\d{3})+(?!\d))/g, '.');
+      let kode = localStorage.getItem('kode') || '',
+        S = null,
+        ch = {};
+
+      async function api(b) {
+        const r = await fetch(API, { method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' }, body: JSON.stringify({ ...b, kode }) });
+        return r.json();
+      }
+      async function masuk() {
+        kode = $('kode').value;
+        await muat();
+      }
+      function keluar() {
+        localStorage.removeItem('kode');
+        location.reload();
+      }
+      function toast(t) {
+        const e = $('toast');
+        e.textContent = t;
+        e.classList.toggle('hidden', !t);
+      }
+
+      async function muat(a = { action: 'state' }) {
+        let d;
+        try {
+          d = await api(a);
+        } catch (e) {
+          $('lerr').textContent = 'Gagal terhubung. Cek URL API.';
+          return;
+        }
+        if (d.error) {
+          $('lerr').textContent = d.error;
+          if (!S) return;
+          toast(d.error);
+          return;
+        }
+        localStorage.setItem('kode', kode);
+        S = d;
+        $('login').classList.add('hidden');
+        $('app').classList.remove('hidden');
+        toast(d.pesan || '');
+        render();
+      }
+
+      function render() {
+        const d = S;
+        if (!d.gaji) {
+          $('periode').textContent = 'Belum ada periode. Isi gaji masuk di bagian bawah.';
+        } else $('periode').textContent = `${d.mulai} sampai ${d.akhir}, hari ke-${d.lewat} dari ${d.total}`;
+        const pct = d.gaji + d.masuk ? d.keluar / (d.gaji + d.masuk) : 0;
+        const st = $('status');
+        [st.textContent, st.className] =
+          d.saldo < 0
+            ? ['Defisit', 'px-3 py-1 rounded-full text-sm font-medium bg-red-100 text-red-800']
+            : pct >= 0.8
+              ? ['Waspada', 'px-3 py-1 rounded-full text-sm font-medium bg-amber-100 text-amber-800']
+              : ['Aman', 'px-3 py-1 rounded-full text-sm font-medium bg-teal-100 text-teal-800'];
+        const k = (l, v, s = '') => `<div class="card"><p class="text-sm text-slate-500">${l}</p><p class="text-xl font-semibold">${v}</p><p class="text-xs text-slate-500">${s}</p></div>`;
+        $('kpi').innerHTML =
+          k('Saldo', rp(d.saldo), `dari ${rp(d.gaji + d.masuk)}`) +
+          k('Pengeluaran', rp(d.keluar), Math.round(pct * 100) + '% dari pemasukan') +
+          k('Batas belanja per hari', rp(d.batas), `${d.hari} hari tersisa`) +
+          k('Hari ini', rp(d.hariIni), d.hariIni > d.batas ? 'melebihi batas' : 'dalam batas') +
+          k('Rata-rata per hari', rp(d.rata)) +
+          k('Proyeksi akhir periode', rp(d.proyeksi), d.proyeksi > d.gaji + d.masuk ? 'melebihi pemasukan' : 'masih aman');
+
+        $('kat').innerHTML =
+          d.kategori
+            .filter((x) => x.budget || x.terpakai)
+            .map((x) => {
+              const r = x.budget ? x.terpakai / x.budget : 1,
+                c = r >= 1 ? 'bg-red-600' : r >= 0.8 ? 'bg-amber-500' : 'bg-teal-600';
+              const sisa = Math.max(0, x.budget - x.terpakai);
+              return `<div><div class="flex justify-between text-sm"><b>${x.nama}</b><span>${rp(x.terpakai)} / ${rp(x.budget)}</span></div>
+     <div class="h-2 rounded bg-slate-200 dark:bg-slate-700 mt-1"><div class="h-2 rounded ${c}" style="width:${Math.min(100, r * 100)}%"></div></div>
+     <p class="text-xs text-slate-500 mt-1">sisa ${rp(sisa)}, sekitar ${rp(sisa / d.hari)} per hari</p></div>`;
+            })
+            .join('') || '<p class="text-sm text-slate-500">Belum ada data.</p>';
+
+        const opt = d.kategori.map((x) => `<option>${x.nama}</option>`).join('');
+        if ($('fkat').innerHTML !== opt) $('fkat').innerHTML = opt;
+        $('bud').innerHTML = d.kategori.map((x) => `<label class="text-xs">${x.nama}<input data-k="${x.nama}" type="number" step="0.5" class="inp bp" value="${x.persen}" oninput="hitungTot()"></label>`).join('');
+        hitungTot();
+
+        $('tx').innerHTML =
+          d.tx
+            .map(
+              (
+                t,
+              ) => `<div class="flex items-center justify-between py-2 text-sm"><div><b>${t.tipe === 'gaji' ? 'Gaji' : t.kat}</b> <span class="text-slate-500">${t.ket || ''}</span><br><span class="text-xs text-slate-500">${t.tgl}</span></div>
+   <div class="flex items-center gap-3"><span class="${t.tipe === 'keluar' ? 'text-red-600' : 'text-teal-700'} font-medium">${t.tipe === 'keluar' ? '-' : '+'}${rp(t.jumlah)}</span>
+   <button class="text-xs underline" onclick="hapus(${t.row},${t.ts})">Hapus</button></div></div>`,
+            )
+            .join('') || '<p class="text-sm text-slate-500">Belum ada transaksi.</p>';
+
+        Object.values(ch).forEach((c) => c.destroy());
+        const ks = d.kategori.filter((x) => x.budget || x.terpakai);
+        ch.a = new Chart($('c1'), {
+          type: 'bar',
+          data: {
+            labels: ks.map((x) => x.nama),
+            datasets: [
+              { label: 'Budget', data: ks.map((x) => x.budget), backgroundColor: '#94a3b8' },
+              { label: 'Terpakai', data: ks.map((x) => x.terpakai), backgroundColor: '#0f766e' },
+            ],
+          },
+          options: { plugins: { legend: { position: 'bottom' } } },
+        });
+        ch.b = new Chart($('c2'), {
+          type: 'bar',
+          data: {
+            labels: d.perHari.map((x) => x[0]),
+            datasets: [
+              { label: 'Pengeluaran', data: d.perHari.map((x) => x[1]), backgroundColor: '#0f766e' },
+              { type: 'line', label: 'Batas harian', data: d.perHari.map(() => d.batas), borderColor: '#d97706', pointRadius: 0 },
+            ],
+          },
+          options: { plugins: { legend: { position: 'bottom' } } },
+        });
+      }
+
+      function hitungTot() {
+        const t = [...document.querySelectorAll('.bp')].reduce((a, e) => a + (+e.value || 0), 0);
+        $('tot').textContent = `(total ${t}%${t !== 100 ? ', idealnya 100%' : ''})`;
+      }
+      const tambah = async () => {
+        await muat({ action: 'tambah', tipe: $('tipe').value, jumlah: $('jml').value, kategori: $('fkat').value, ket: $('ket').value });
+        $('jml').value = $('ket').value = '';
+      };
+      const hapus = (row, ts) => confirm('Hapus transaksi ini?') && muat({ action: 'hapus', row, ts });
+      const gaji = () => muat({ action: 'gaji', jumlah: $('gj').value, akhir: $('gakhir').value });
+      const akhir = () => $('akhir2').value && muat({ action: 'akhir', akhir: $('akhir2').value });
+      const simpanBudget = () => muat({ action: 'budget', items: [...document.querySelectorAll('.bp')].map((e) => ({ k: e.dataset.k, p: e.value })) });
+
+      if (kode) muat();
+      $('kode').addEventListener('keydown', (e) => e.key === 'Enter' && masuk());
+    </script>
+  </body>
+</html>
